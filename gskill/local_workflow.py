@@ -18,7 +18,12 @@ from __future__ import annotations
 
 import re
 import subprocess
+from dataclasses import dataclass, field
 from pathlib import Path
+
+from rich.console import Group
+from rich.live import Live
+from rich.text import Text
 
 from . import ui
 from .discovery import Skill
@@ -72,6 +77,45 @@ def _parse_steps(text: str) -> list[str]:
     return steps[:MAX_STEPS]
 
 
+@dataclass
+class _Step:
+    text: str
+    status: str = "pending"   # pending | running | done
+    phase: str = ""           # current sub-activity while running
+    summary: str = ""         # brief result once done
+
+
+@dataclass
+class _Progress:
+    """Live, in-place view of the step pipeline."""
+
+    steps: list[_Step] = field(default_factory=list)
+    note: str = ""
+
+    def render(self) -> Group:
+        rows: list[Text] = []
+        for i, s in enumerate(self.steps, 1):
+            if s.status == "done":
+                line = Text(f"  ✓ {i}. {_short(s.text, 50)}", style=ui.GREEN)
+                if s.summary:
+                    line.append(f"  — {_short(s.summary, 70)}", style=ui.GRAY)
+            elif s.status == "running":
+                line = Text(f"  ⟳ {i}. {_short(s.text, 50)}", style=f"bold {ui.BLUE}")
+                if s.phase:
+                    line.append(f"  · {s.phase}…", style=ui.ORANGE)
+            else:
+                line = Text(f"  · {i}. {_short(s.text, 50)}", style=ui.GRAY)
+            rows.append(line)
+        if self.note:
+            rows.append(Text(f"  {self.note}", style=ui.GRAY))
+        return Group(*rows)
+
+
+def _short(text: str, n: int) -> str:
+    text = " ".join(text.split())
+    return text if len(text) <= n else text[: n - 1] + "…"
+
+
 def _goal(skill: Skill, context: str) -> str:
     try:
         body = skill.path.read_text(encoding="utf-8", errors="ignore")
@@ -87,35 +131,57 @@ def _goal(skill: Skill, context: str) -> str:
 def run(skill: Skill, model: str, *, cwd: Path, context: str = "") -> tuple[int, str]:
     """Run the full multi-step pipeline. Returns ``(exit_code, markdown)``."""
     goal = _goal(skill, context)
-
-    ui.info("Planning steps…")
-    plan_raw = _ollama(model, "planner", goal, cwd)
-    steps = _parse_steps(plan_raw) or [f"Complete the goal for skill '{skill.name}'."]
-    ui.info(f"{len(steps)} step(s) planned.")
+    prog = _Progress(note="Planning steps…")
 
     running_summary = ""          # short context carried between steps
     transcript: list[str] = []    # full outputs, used only for final synthesis
 
-    for i, step in enumerate(steps, 1):
-        ui.info(f"Step {i}/{len(steps)}: {step}")
-        ctx = f"{goal}\n\nProgress so far:\n{running_summary or '(none)'}\n\nCURRENT STEP: {step}"
-        out = _ollama(model, "executor", ctx, cwd)
+    with Live(prog.render(), console=ui.console, refresh_per_second=8,
+              transient=False) as live:
+        plan_raw = _ollama(model, "planner", goal, cwd)
+        step_texts = _parse_steps(plan_raw) or \
+            [f"Complete the goal for skill '{skill.name}'."]
+        prog.steps = [_Step(t) for t in step_texts]
+        prog.note = ""
+        live.update(prog.render())
 
-        review = _ollama(model, "reviewer",
-                         f"STEP: {step}\n\nOUTPUT:\n{out}", cwd)
-        if not review.strip().upper().startswith("APPROVE"):
-            ui.warn(f"Step {i} needs revision; retrying once.")
-            out = _ollama(model, "executor",
-                          f"{ctx}\n\nPREVIOUS ATTEMPT:\n{out}\n\n"
-                          f"REVIEWER CORRECTIONS:\n{review}\n\nRedo the step.", cwd)
+        for i, st in enumerate(prog.steps):
+            step = st.text
+            st.status, st.phase = "running", "executing"
+            live.update(prog.render())
 
-        summary = _ollama(model, "summarizer", out, cwd) or out[:280]
-        running_summary += f"- Step {i}: {summary}\n"
-        transcript.append(f"### Step {i}: {step}\n{out}")
+            ctx = (f"{goal}\n\nProgress so far:\n{running_summary or '(none)'}"
+                   f"\n\nCURRENT STEP: {step}")
+            out = _ollama(model, "executor", ctx, cwd)
 
-    ui.info("Synthesizing final result…")
-    final = _ollama(model, "synthesizer",
-                    f"{goal}\n\nSTEP RESULTS:\n" + "\n\n".join(transcript), cwd)
+            st.phase = "reviewing"
+            live.update(prog.render())
+            review = _ollama(model, "reviewer",
+                             f"STEP: {step}\n\nOUTPUT:\n{out}", cwd)
+            if not review.strip().upper().startswith("APPROVE"):
+                st.phase = "revising"
+                live.update(prog.render())
+                out = _ollama(model, "executor",
+                              f"{ctx}\n\nPREVIOUS ATTEMPT:\n{out}\n\n"
+                              f"REVIEWER CORRECTIONS:\n{review}\n\nRedo the step.", cwd)
+
+            st.phase = "summarizing"
+            live.update(prog.render())
+            summary = _ollama(model, "summarizer", out, cwd) or out[:280]
+
+            st.status, st.phase, st.summary = "done", "", summary
+            live.update(prog.render())
+            running_summary += f"- Step {i + 1}: {summary}\n"
+            transcript.append(f"### Step {i + 1}: {step}\n{out}")
+
+        prog.note = "Synthesizing final result…"
+        live.update(prog.render())
+        final = _ollama(model, "synthesizer",
+                        f"{goal}\n\nSTEP RESULTS:\n" + "\n\n".join(transcript), cwd)
+        prog.note = ""
+        live.update(prog.render())
+
+    steps = step_texts
 
     markdown = (
         f"_Multi-step local run · {len(steps)} steps · model {model}_\n\n"
@@ -124,5 +190,5 @@ def run(skill: Skill, model: str, *, cwd: Path, context: str = "") -> tuple[int,
         f"<details><summary>Step transcript</summary>\n\n"
         + "\n\n".join(transcript) + "\n</details>\n"
     )
-    print(markdown)
+    print("\n" + markdown)
     return 0, markdown
