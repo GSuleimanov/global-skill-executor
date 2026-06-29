@@ -63,6 +63,12 @@ def confirm(message: str, default: bool = True) -> bool:
     return bool(questionary.confirm(message, default=default).ask())
 
 
+def ask_text(message: str) -> str:
+    """Free-text input; returns '' if left blank or aborted."""
+    answer = questionary.text(message, style=_STYLE).ask()
+    return (answer or "").strip()
+
+
 def pick_one(message: str, options: list[str], default: str | None = None) -> str | None:
     return questionary.select(message, choices=options, default=default,
                               style=_STYLE).ask()

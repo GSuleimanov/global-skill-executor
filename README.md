@@ -30,6 +30,7 @@ gskill run longread -e claude -m claude-opus-4-8
 gskill run longread -e local  -m llama3
 gskill run longread --relative              # cd into the skill's project first
 gskill run longread -p my-repo              # disambiguate by project alias
+gskill run longread -c "write about Rust async, ~800 words"   # extra context
 ```
 
 ### The default picker (`gskill`)
@@ -45,6 +46,9 @@ gskill run longread -p my-repo              # disambiguate by project alias
   asked, defaulting to your last choice.
 - **Model** (`-m`): if omitted you pick from the engine's catalog
   (Ollama models are discovered live via `ollama list`).
+- **Context** (`-c`): ad-hoc input/instructions for this run, injected as an
+  "Additional context" section in the prompt. The interactive picker also asks
+  for it (enter to skip).
 - **`--relative` / `-r`**: run from the skill's own project directory.
   Without it, the skill runs in your current directory (global).
 

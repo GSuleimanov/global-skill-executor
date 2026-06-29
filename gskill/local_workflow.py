@@ -116,21 +116,24 @@ def _short(text: str, n: int) -> str:
     return text if len(text) <= n else text[: n - 1] + "…"
 
 
-def _goal(skill: Skill, context: str) -> str:
+def _goal(skill: Skill, context: str, user_context: str) -> str:
     try:
         body = skill.path.read_text(encoding="utf-8", errors="ignore")
     except OSError:
         body = ""
+    usr = (f"\n\nAdditional context for this run:\n{user_context.strip()}\n"
+           if user_context.strip() else "")
     ctx = f"\n\nPrior related context:\n{context}\n" if context.strip() else ""
     return (
         f"GOAL — execute the skill '{skill.name}':\n"
-        f"--- SKILL ---\n{body}\n--- END SKILL ---{ctx}"
+        f"--- SKILL ---\n{body}\n--- END SKILL ---{usr}{ctx}"
     )
 
 
-def run(skill: Skill, model: str, *, cwd: Path, context: str = "") -> tuple[int, str]:
+def run(skill: Skill, model: str, *, cwd: Path, context: str = "",
+        user_context: str = "") -> tuple[int, str]:
     """Run the full multi-step pipeline. Returns ``(exit_code, markdown)``."""
-    goal = _goal(skill, context)
+    goal = _goal(skill, context, user_context)
     prog = _Progress(note="Planning steps…")
 
     running_summary = ""          # short context carried between steps

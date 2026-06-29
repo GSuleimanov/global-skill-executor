@@ -58,7 +58,7 @@ def _choose_model(reg: registry.Registry, engine: str, requested: str | None) ->
 
 
 def _execute(reg: registry.Registry, skill: Skill, engine: str | None,
-             model: str | None, relative: bool) -> int:
+             model: str | None, relative: bool, user_context: str = "") -> int:
     engine = _choose_engine(reg, engine)
     if not engine:
         return 1
@@ -78,8 +78,8 @@ def _execute(reg: registry.Registry, skill: Skill, engine: str | None,
     ui.info(f"Running [bold]{skill.name}[/bold] via [blue]{engine}[/blue] "
             f"({model}) in [gray50]{skill.base if relative else Path.cwd()}[/gray50]")
     try:
-        code, output = runners.run(skill, engine, model,
-                                   relative=relative, context=context)
+        code, output = runners.run(skill, engine, model, relative=relative,
+                                   context=context, user_context=user_context)
     except RuntimeError as exc:
         ui.error(str(exc))
         return 1
@@ -102,10 +102,12 @@ def cmd_pick(reg: registry.Registry, _args) -> int:
     skill = selection.pick_skill(skills)
     if skill is None:
         return 0
+    user_context = selection.ask_text(
+        "Extra context for this run? (optional, enter to skip):")
     relative = selection.confirm(
         "Run from the skill's own project (relative)? "
         "(no = run in current dir, global)", default=True)
-    return _execute(reg, skill, None, None, relative)
+    return _execute(reg, skill, None, None, relative, user_context)
 
 
 def cmd_setup(reg: registry.Registry, _args) -> int:
@@ -204,7 +206,8 @@ def cmd_run(reg: registry.Registry, args) -> int:
         skill = matches[labels.index(pick)]
     else:
         skill = matches[0]
-    return _execute(reg, skill, args.engine, args.model, args.relative)
+    return _execute(reg, skill, args.engine, args.model, args.relative,
+                    args.context or "")
 
 
 # --------------------------------------------------------------------------- #
@@ -237,6 +240,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_run.add_argument("--model", "-m")
     p_run.add_argument("--relative", "-r", action="store_true",
                        help="Run from the skill's own project dir (else cwd/global)")
+    p_run.add_argument("--context", "-c",
+                       help="Extra ad-hoc context/input for this run")
     return p
 
 

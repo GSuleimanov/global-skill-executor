@@ -16,20 +16,23 @@ def engine_available(engine: str) -> bool:
     return shutil.which(_BINARIES.get(engine, "")) is not None
 
 
-def build_prompt(skill: Skill, context: str = "") -> str:
+def build_prompt(skill: Skill, context: str = "", user_context: str = "") -> str:
     """Wrap the skill file content into an executable instruction prompt.
 
     ``context`` is an optional block of prior related runs to inform the model.
+    ``user_context`` is ad-hoc input the caller supplied for this run.
     """
     try:
         body = skill.path.read_text(encoding="utf-8", errors="ignore")
     except OSError:
         body = ""
     ctx = f"\n\n{context}\n" if context.strip() else ""
+    usr = (f"\n\n## Additional context for this run\n{user_context.strip()}\n"
+           if user_context.strip() else "")
     return (
         f"You are executing the skill '{skill.name}'. "
         f"Follow its instructions below and carry out the task end to end."
-        f"{ctx}\n"
+        f"{usr}{ctx}\n"
         f"--- SKILL: {skill.name} ---\n{body}\n--- END SKILL ---"
     )
 
@@ -48,10 +51,11 @@ def build_command(engine: str, model: str, prompt: str) -> list[str]:
 
 
 def run(skill: Skill, engine: str, model: str, *, relative: bool,
-        context: str = "") -> tuple[int, str]:
+        context: str = "", user_context: str = "") -> tuple[int, str]:
     """Run the skill, echoing output live while capturing it.
 
     ``relative`` => cwd is the skill's project base, else the current dir.
+    ``user_context`` is ad-hoc input supplied for this run.
     Returns ``(exit_code, captured_output)``.
     """
     if not engine_available(engine):
@@ -63,9 +67,10 @@ def run(skill: Skill, engine: str, model: str, *, relative: bool,
     # Local models run through the multi-step quality pipeline.
     if engine == "local":
         from . import local_workflow
-        return local_workflow.run(skill, model, cwd=cwd, context=context)
+        return local_workflow.run(skill, model, cwd=cwd, context=context,
+                                  user_context=user_context)
 
-    prompt = build_prompt(skill, context)
+    prompt = build_prompt(skill, context, user_context)
     cmd = build_command(engine, model, prompt)
     proc = subprocess.Popen(
         cmd, cwd=str(cwd), stdout=subprocess.PIPE,
