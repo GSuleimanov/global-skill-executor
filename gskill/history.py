@@ -11,8 +11,8 @@ Summary file format (stable contract — other AI calls rely on it):
     >=5:     ## Result
              <captured output>
 
-Files are named ``YYYY-MM-DD-<skill-slug>.md`` so the date is visible and
-multiple runs of the same skill on the same day overwrite (latest wins).
+Files are named ``YYYY-MM-DD-N-<skill-slug>.md`` where N is the 1-based index
+of the run within that day (across all skills), so every run is kept.
 """
 from __future__ import annotations
 
@@ -52,6 +52,13 @@ def slugify(text: str) -> str:
     return s.strip("-") or "skill"
 
 
+def _next_index(day: date) -> int:
+    """1-based count of runs already recorded for ``day`` (across all skills)."""
+    if not HISTORY_DIR.exists():
+        return 1
+    return sum(1 for _ in HISTORY_DIR.glob(f"{day:%Y-%m-%d}-*.md")) + 1
+
+
 def _file_date(path: Path) -> date | None:
     m = re.match(r"(\d{4})-(\d{2})-(\d{2})-", path.name)
     if not m:
@@ -83,7 +90,8 @@ def save(skill: Skill, engine: str, model: str, *, relative: bool,
          output: str, when: datetime | None = None) -> Path:
     when = when or datetime.now()
     HISTORY_DIR.mkdir(parents=True, exist_ok=True)
-    path = HISTORY_DIR / f"{when:%Y-%m-%d}-{slugify(skill.name)}.md"
+    idx = _next_index(when.date())
+    path = HISTORY_DIR / f"{when:%Y-%m-%d}-{idx}-{slugify(skill.name)}.md"
     brief = (skill.description or "").replace("\n", " ").strip() or "(no description)"
     header = (
         f"# {skill.name}\n"

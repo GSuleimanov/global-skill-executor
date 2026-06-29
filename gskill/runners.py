@@ -59,6 +59,12 @@ def run(skill: Skill, engine: str, model: str, *, relative: bool,
             f"'{_BINARIES[engine]}' is not installed or not on PATH."
         )
     cwd = skill.base if relative else Path.cwd()
+
+    # Local models run through the multi-step quality pipeline.
+    if engine == "local":
+        from . import local_workflow
+        return local_workflow.run(skill, model, cwd=cwd, context=context)
+
     prompt = build_prompt(skill, context)
     cmd = build_command(engine, model, prompt)
     proc = subprocess.Popen(

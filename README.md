@@ -83,4 +83,20 @@ brief: <one-line description — matched against future runs>
 ```
 
 - **Line 1** = title, **line 3** = `brief:` description (the match keys).
-- Same skill + same day → the file is overwritten (latest wins).
+- Files are `YYYY-MM-DD-N-<slug>.md` where **N** is the run number that day
+  (across all skills) — every run is kept, nothing is overwritten.
+
+## Local models: multi-step quality pipeline
+
+Local (Ollama) runs don't do a single shot — a weak model gets the best chance
+via decomposition ([`local_workflow.py`](gskill/local_workflow.py)):
+
+1. **Plan** — a planner call breaks the task into 3-6 atomic steps.
+2. **Execute** — each step runs as a *separate* role-scoped call with a tiny
+   context: only the goal + a short running summary of prior steps.
+3. **Review** — every step output is checked; one corrective retry on failure.
+4. **Compress** — each result is summarized to ~2 sentences before being passed
+   forward, so context never bloats.
+5. **Synthesize** — the final deliverable is assembled from the full transcript.
+
+Claude/Cursor runs remain single-shot (they don't need the scaffolding).
