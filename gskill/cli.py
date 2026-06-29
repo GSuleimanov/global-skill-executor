@@ -4,7 +4,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from . import models, registry, runners, selection, ui
+from . import models, registry, repo_scan, runners, selection, ui
 from .discovery import Skill, all_skills, discover
 
 
@@ -138,6 +138,30 @@ def cmd_add(reg: registry.Registry, args) -> int:
     return 0
 
 
+def cmd_scan(reg: registry.Registry, args) -> int:
+    root = Path(args.directory).expanduser() if args.directory else Path.home()
+    ui.banner()
+    ui.info(f"Scanning git repos under [dim]{root}[/dim] "
+            f"(depth ≤ {args.depth})…")
+    with ui.console.status("[cyan]Walking directories", spinner="dots"):
+        found = repo_scan.scan(root, max_depth=args.depth)
+    if not found:
+        ui.warn("No git repos with AI configs found.")
+        return 0
+    new_skills: list[Skill] = []
+    for repo, hits in found:
+        ui.configs_table(str(repo), hits)
+        alias = reg.add_project(repo)
+        ui.ok(f"Registered '[yellow]{alias}[/yellow]'")
+        new_skills += all_skills(hits)
+    registry.save(reg)
+    if new_skills and selection.confirm("Select which discovered skills to enable?",
+                                        default=True):
+        selection.select_skills(new_skills, reg)
+        registry.save(reg)
+    return 0
+
+
 def cmd_run(reg: registry.Registry, args) -> int:
     skills = _enabled_skills(reg)
     matches = [s for s in skills if s.name == args.skill]
@@ -176,6 +200,13 @@ def build_parser() -> argparse.ArgumentParser:
     p_add = sub.add_parser("add", help="Register a project directory")
     p_add.add_argument("directory")
 
+    p_scan = sub.add_parser(
+        "scan", help="Find git repos with AI configs and register them")
+    p_scan.add_argument("directory", nargs="?",
+                        help="Root to scan (default: home)")
+    p_scan.add_argument("--depth", type=int, default=6,
+                        help="Max directory depth to walk (default: 6)")
+
     p_run = sub.add_parser("run", help="Run a skill by name")
     p_run.add_argument("skill")
     p_run.add_argument("--project", "-p", help="Restrict to a project alias/path")
@@ -193,6 +224,7 @@ def main(argv: list[str] | None = None) -> int:
         None: cmd_interactive,
         "ls": cmd_list,
         "add": cmd_add,
+        "scan": cmd_scan,
         "run": cmd_run,
     }
     try:
