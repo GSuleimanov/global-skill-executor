@@ -28,9 +28,15 @@ def _enabled_skills(reg: registry.Registry) -> list[Skill]:
 def _choose_engine(reg: registry.Registry, requested: str | None) -> str | None:
     if requested:
         return requested
-    avail = [e for e in models.ENGINES if runners.engine_available(e)] or list(models.ENGINES)
-    default = reg.last_engine if reg.last_engine in avail else avail[0]
-    return selection.pick_one("Run with which engine?", avail, default=default)
+    labels = {"claude": "Claude Code", "cursor": "Cursor Agent",
+              "local": "Local model (Ollama / other)"}
+    order = [e for e in models.ENGINES if runners.engine_available(e)] or list(models.ENGINES)
+    options = [labels[e] for e in order]
+    default = labels.get(reg.last_engine) if reg.last_engine in order else options[0]
+    pick = selection.pick_one("Choose a provider:", options, default=default)
+    if pick is None:
+        return None
+    return next(e for e, lbl in labels.items() if lbl == pick)
 
 
 def _choose_model(reg: registry.Registry, engine: str, requested: str | None) -> str | None:
@@ -38,9 +44,16 @@ def _choose_model(reg: registry.Registry, engine: str, requested: str | None) ->
         return requested
     avail = models.available_models(engine)
     if not avail:
-        ui.warn(f"No models discovered for '{engine}'.")
+        if engine == "local":
+            ui.warn("No local models found. Is 'ollama' installed and a model pulled "
+                    "(e.g. `ollama pull llama3`)?")
+        else:
+            ui.warn(f"No models discovered for '{engine}'.")
         return None
     default = reg.last_model.get(engine) or models.default_model(engine)
+    # Local model lists can be long → type-to-filter picker.
+    if engine == "local":
+        return selection.pick_filterable("Pick a local model:", avail, default=default)
     return selection.pick_one(f"Pick a model for {engine}:", avail, default=default)
 
 
@@ -68,7 +81,24 @@ def _execute(reg: registry.Registry, skill: Skill, engine: str | None,
 # --------------------------------------------------------------------------- #
 # Commands
 # --------------------------------------------------------------------------- #
-def cmd_interactive(reg: registry.Registry, _args) -> int:
+def cmd_pick(reg: registry.Registry, _args) -> int:
+    """Default no-arg flow: fuzzy-pick a skill, then provider, then model."""
+    ui.banner()
+    skills = _enabled_skills(reg)
+    if not skills:
+        ui.warn("No enabled skills found. Run [bold]gskill setup[/bold] or "
+                "[bold]gskill scan[/bold] to discover some.")
+        return 0
+    skill = selection.pick_skill(skills)
+    if skill is None:
+        return 0
+    relative = selection.confirm(
+        "Run from the skill's own project (relative)? "
+        "(no = run in current dir, global)", default=True)
+    return _execute(reg, skill, None, None, relative)
+
+
+def cmd_setup(reg: registry.Registry, _args) -> int:
     ui.banner()
 
     # 1. Home directory configs + skill selection.
@@ -97,21 +127,7 @@ def cmd_interactive(reg: registry.Registry, _args) -> int:
 
     # 3. Show aliases.
     ui.projects_table(reg.projects)
-
-    # 4. Optionally run a skill.
-    if selection.confirm("Run a skill now?", default=True):
-        skills = _enabled_skills(reg)
-        if not skills:
-            ui.warn("No enabled skills to run.")
-            return 0
-        labels = [f"{s.name}  ·  {s.provider}  ·  {s.base.name}" for s in skills]
-        pick = selection.pick_one("Which skill?", labels)
-        if pick is None:
-            return 0
-        skill = skills[labels.index(pick)]
-        relative = selection.confirm(
-            "Run from the skill's own project (relative)?", default=True)
-        return _execute(reg, skill, None, None, relative)
+    ui.ok("Setup complete. Run [bold]gskill[/bold] to pick and run a skill.")
     return 0
 
 
@@ -195,6 +211,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sub = p.add_subparsers(dest="command")
 
+    sub.add_parser("setup", help="Onboard: scan home, select skills, add dirs")
     sub.add_parser("ls", help="List configs, projects and enabled skills")
 
     p_add = sub.add_parser("add", help="Register a project directory")
@@ -221,7 +238,8 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     reg = registry.load()
     dispatch = {
-        None: cmd_interactive,
+        None: cmd_pick,
+        "setup": cmd_setup,
         "ls": cmd_list,
         "add": cmd_add,
         "scan": cmd_scan,

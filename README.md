@@ -20,7 +20,9 @@ Now `gskill` is on your PATH everywhere.
 ## Usage
 
 ```bash
-gskill                      # interactive: scan → select skills → add dirs → run
+gskill                      # fuzzy-pick a skill (grouped by project) → provider → model
+gskill setup                # onboard: scan home, select skills, add dirs
+gskill scan [dir]           # find git repos with AI configs and register them
 gskill ls                   # show configs, project aliases, enabled skills
 gskill add ~/work/my-repo   # register a project dir (gets a short alias)
 gskill run longread                         # run by name (prompts for engine/model)
@@ -29,6 +31,15 @@ gskill run longread -e local  -m llama3
 gskill run longread --relative              # cd into the skill's project first
 gskill run longread -p my-repo              # disambiguate by project alias
 ```
+
+### The default picker (`gskill`)
+
+1. **Pick a skill** — all enabled skills, grouped by project (group headers in a
+   distinct color). Just start typing to filter the list; ↑↓ to move, enter to select.
+2. **Pick a provider** — Claude Code · Cursor Agent · Local model (Ollama/other).
+3. **Pick a model** — for local models the full `ollama list` is shown and is
+   type-to-filter too; for Claude/Cursor you pick from the catalog.
+4. **Relative or global** — run from the skill's own project, or your current dir.
 
 - **Engine** (`-e`): `claude` · `cursor` · `local` (Ollama). If omitted you're
   asked, defaulting to your last choice.
