@@ -4,7 +4,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from . import models, registry, repo_scan, runners, selection, ui
+from . import history, models, registry, repo_scan, runners, selection, ui
 from .discovery import Skill, all_skills, discover
 
 
@@ -69,13 +69,24 @@ def _execute(reg: registry.Registry, skill: Skill, engine: str | None,
     reg.last_model[engine] = model
     registry.save(reg)
 
-    ui.info(f"Running [bold]{skill.name}[/bold] via [cyan]{engine}[/cyan] "
-            f"({model}) in [dim]{skill.base if relative else Path.cwd()}[/dim]")
+    # Pull in prior related runs as context.
+    prior = history.matches(skill)
+    if prior:
+        ui.info(f"Found {len(prior)} prior related run(s); adding as context.")
+    context = history.render_context(prior)
+
+    ui.info(f"Running [bold]{skill.name}[/bold] via [blue]{engine}[/blue] "
+            f"({model}) in [gray50]{skill.base if relative else Path.cwd()}[/gray50]")
     try:
-        return runners.run(skill, engine, model, relative=relative)
+        code, output = runners.run(skill, engine, model,
+                                   relative=relative, context=context)
     except RuntimeError as exc:
         ui.error(str(exc))
         return 1
+
+    saved = history.save(skill, engine, model, relative=relative, output=output)
+    ui.ok(f"Summary saved to [gray50]{saved}[/gray50]")
+    return code
 
 
 # --------------------------------------------------------------------------- #
@@ -83,7 +94,6 @@ def _execute(reg: registry.Registry, skill: Skill, engine: str | None,
 # --------------------------------------------------------------------------- #
 def cmd_pick(reg: registry.Registry, _args) -> int:
     """Default no-arg flow: fuzzy-pick a skill, then provider, then model."""
-    ui.banner()
     skills = _enabled_skills(reg)
     if not skills:
         ui.warn("No enabled skills found. Run [bold]gskill setup[/bold] or "
@@ -99,8 +109,6 @@ def cmd_pick(reg: registry.Registry, _args) -> int:
 
 
 def cmd_setup(reg: registry.Registry, _args) -> int:
-    ui.banner()
-
     # 1. Home directory configs + skill selection.
     ui.spinner("Scanning home directory")
     home_hits = discover(Path.home())
@@ -121,7 +129,7 @@ def cmd_setup(reg: registry.Registry, _args) -> int:
             ui.warn("No skills found there.")
             continue
         alias = reg.add_project(d)
-        ui.ok(f"Registered as alias '[yellow]{alias}[/yellow]'")
+        ui.ok(f"Registered as alias '[green]{alias}[/green]'")
         selection.select_skills(all_skills(hits), reg)
         registry.save(reg)
 
@@ -132,7 +140,6 @@ def cmd_setup(reg: registry.Registry, _args) -> int:
 
 
 def cmd_list(reg: registry.Registry, _args) -> int:
-    ui.banner()
     ui.configs_table("~ (home)", discover(Path.home()))
     ui.projects_table(reg.projects)
     skills = _enabled_skills(reg)
@@ -150,16 +157,15 @@ def cmd_add(reg: registry.Registry, args) -> int:
     ui.configs_table(str(d), hits)
     alias = reg.add_project(d)
     registry.save(reg)
-    ui.ok(f"Registered '[yellow]{alias}[/yellow]' → {d}")
+    ui.ok(f"Registered '[green]{alias}[/green]' → {d}")
     return 0
 
 
 def cmd_scan(reg: registry.Registry, args) -> int:
     root = Path(args.directory).expanduser() if args.directory else Path.home()
-    ui.banner()
-    ui.info(f"Scanning git repos under [dim]{root}[/dim] "
+    ui.info(f"Scanning git repos under [grey50]{root}[/grey50] "
             f"(depth ≤ {args.depth})…")
-    with ui.console.status("[cyan]Walking directories", spinner="dots"):
+    with ui.console.status("[blue]Walking directories", spinner="dots"):
         found = repo_scan.scan(root, max_depth=args.depth)
     if not found:
         ui.warn("No git repos with AI configs found.")
@@ -168,7 +174,7 @@ def cmd_scan(reg: registry.Registry, args) -> int:
     for repo, hits in found:
         ui.configs_table(str(repo), hits)
         alias = reg.add_project(repo)
-        ui.ok(f"Registered '[yellow]{alias}[/yellow]'")
+        ui.ok(f"Registered '[green]{alias}[/green]'")
         new_skills += all_skills(hits)
     registry.save(reg)
     if new_skills and selection.confirm("Select which discovered skills to enable?",
@@ -236,6 +242,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    history.prune()  # clear summaries older than 3 days on every invocation
     reg = registry.load()
     dispatch = {
         None: cmd_pick,

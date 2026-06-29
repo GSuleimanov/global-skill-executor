@@ -62,3 +62,25 @@ gskill run longread -p my-repo              # disambiguate by project alias
 | `cli.py`        | Argument parsing & orchestration only |
 
 State lives in `~/.config/gskill/registry.json`.
+
+## Run summaries (auto-context)
+
+Every run is captured to `~/.config/gskill/history/` as
+`YYYY-MM-DD-<skill-slug>.md`. On the next run gskill finds **prior related
+summaries** (same skill title, or ≥2 overlapping words in the brief) and feeds
+them to the model as context. Summaries **older than 3 days are pruned** on
+every `gskill` invocation.
+
+The format is fixed so other AI calls can navigate it cheaply:
+
+```markdown
+# <skill-title>
+date: YYYY-MM-DD | engine: <e> | model: <m> | project: <p> | relative: <bool>
+brief: <one-line description — matched against future runs>
+
+## Result
+<captured output>
+```
+
+- **Line 1** = title, **line 3** = `brief:` description (the match keys).
+- Same skill + same day → the file is overwritten (latest wins).

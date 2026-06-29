@@ -11,12 +11,13 @@ from .registry import Registry
 
 # Color scheme for the fuzzy pickers.
 _STYLE = questionary.Style([
-    ("separator", "fg:#888888 italic"),   # project group headers
-    ("qmark", "fg:#d75fff bold"),
-    ("pointer", "fg:#d75fff bold"),
-    ("highlighted", "fg:#d75fff bold"),
-    ("selected", "fg:#5fd700"),
-    ("answer", "fg:#5fd700 bold"),
+    ("separator", "fg:#ff8700 bold"),     # project group headers (orange)
+    ("qmark", "fg:#5fafff bold"),         # blue
+    ("pointer", "fg:#5fafff bold"),       # blue
+    ("highlighted", "fg:#5fafff bold"),   # blue
+    ("selected", "fg:#5fd700"),           # green
+    ("answer", "fg:#5fd700 bold"),        # green
+    ("instruction", "fg:#888888"),        # gray
 ])
 
 
